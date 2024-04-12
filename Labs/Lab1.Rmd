@@ -1,0 +1,168 @@
+---
+title: "Lab 1"
+author: "Hope Hahn"
+date: "2024-04-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(jsonlite) #convert results from API queries into R-friendly formats 
+library(tidyverse) #tidy
+library(tidytext) #text data management and analysisi
+library(ggplot2) #plot word frequencies and publication dates
+
+#assign API key.  When you create a NYT Dev account, you will be given a key
+API_KEY <- "ARgqCDiG84qHNSqT2ziyCbLP7skAYQYS"
+```
+
+## Assignment (Due Tuesday 4/9 11:59pm)
+
+Reminder: Please suppress all long and extraneous output from your submissions (ex: lists of tokens).
+
+1.  Create a free New York Times account (<https://developer.nytimes.com/get-started>)
+
+2.  Pick an interesting environmental key word(s) and use the {jsonlite} package to query the API. Pick something high profile enough and over a large enough time frame that your query yields enough articles for an interesting examination.
+
+```{r}
+term1 <- "Marine" 
+begin_date <- "20100120"
+end_date <- "20230401"
+
+#construct the query url using API operators
+baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=",term1,"&begin_date=",begin_date,"&end_date=",end_date,"&facet_filter=true&api-key=",API_KEY, sep="")
+```
+
+```{r}
+#run initial query
+initialQuery <- fromJSON(baseurl)
+
+#maxPages <- round((initialQuery$response$meta$hits[1] / 10)-1) 
+maxPages <- 10
+
+#initiate a list to hold results of our for loop
+pages <- list()
+
+#loop
+for(i in 1:maxPages){
+  nytSearch <- fromJSON((baseurl), flatten = TRUE) %>% data.frame() 
+  message("Retrieving page ", i)
+  pages[[i+1]] <- nytSearch 
+  Sys.sleep(12)
+}
+
+nyt_df <- bind_rows(pages)
+```
+
+3.  Recreate the publications per day and word frequency plots using the first paragraph field. This time filter on the response.docs.news_desk variable to winnow out irrelevant results.
+
+-   Make some (at least 3) transformations to the corpus including: add context-specific stopword(s), stem a key term and its variants, remove numbers)
+
+```{r}
+# publication dates
+nyt_df %>%
+  mutate(pubDay=gsub("T.*","",response.docs.pub_date)) %>% 
+  group_by(pubDay) %>%
+  summarise(count=n()) %>%
+  filter(count >= 2) %>%
+  ggplot() +
+  geom_bar(aes(x=reorder(pubDay, count), y=count), stat="identity") +
+  coord_flip() #bring date so bars go longwise
+```
+
+```{r}
+# filter by first paragraph
+tokenized <- nyt_df %>% 
+  filter(response.docs.news_desk %in% c("Science")) %>% 
+  unnest_tokens(word, response.docs.lead_paragraph)
+```
+
+```{r}
+# stop words
+#load stop words
+data(stop_words)
+
+#stop word anti_join
+tokenized <- tokenized %>% 
+  anti_join(stop_words)
+
+#remove all numbers
+clean_tokens <- str_remove_all(tokenized$word, "[:digit:]") 
+
+#remove s contractions
+clean_tokens <- gsub("’s", '', clean_tokens)
+
+tokenized$clean <- clean_tokens
+
+#remove the empty strings
+tib <-subset(tokenized, clean!="")
+
+#reassign
+tokenized <- tib
+
+#try again
+tokenized %>%
+  count(clean, sort = TRUE) %>%
+  filter(n > 10) %>% 
+  mutate(clean = reorder(clean, n)) %>%
+  ggplot(aes(n, clean)) +
+  geom_col() +
+  labs(y = NULL)
+```
+
+4.  Recreate the publications per day and word frequency plots using the headlines variable (response.docs.headline.main). Compare the distributions of word frequencies between the first paragraph and headlines. Do you see any difference?
+
+* Yes, most of the words are different; sea and shark are the only words that are consistent among the two. However, sea comes up a lot more in the first paragraph than in the headlines. The frequency of the headline words is a lot less than the first paragraph search as well, and the words show up a max of 10 times rather than 20+.
+
+
+```{r}
+# pub date
+nyt_df %>%
+  mutate(pubDay=gsub("T.*","",response.docs.pub_date)) %>% 
+  group_by(pubDay) %>%
+  summarise(count=n()) %>%
+  filter(count >= 2) %>%
+  ggplot() +
+  geom_bar(aes(x=reorder(pubDay, count), y=count), stat="identity") +
+  coord_flip() #bring date so bars go longwise
+
+# filter using headlines
+tokenized2 <- nyt_df %>% 
+  filter(response.docs.news_desk %in% c("Science")) %>% 
+  unnest_tokens(word, response.docs.headline.main) 
+```
+
+```{r}
+#load stop words
+data(stop_words)
+
+#stop word anti_join
+tokenized2 <- tokenized2 %>% 
+  anti_join(stop_words)
+
+#remove all numbers
+clean_tokens2 <- str_remove_all(tokenized2$word, "[:digit:]") 
+
+#remove s contractions
+clean_tokens2 <- gsub("’s", '', clean_tokens2)
+
+tokenized2$clean <- clean_tokens2
+
+#remove the empty strings
+tib2 <-subset(tokenized2, clean!="")
+
+#reassign
+tokenized2 <- tib2
+
+# plot
+tokenized2 %>%
+  count(word, sort = TRUE) %>% 
+  filter(n > 7) %>% 
+  mutate(word = reorder(word, n)) %>% 
+  ggplot(aes(n, word)) + 
+  geom_col() +
+  labs(y = NULL)
+```
+
+
